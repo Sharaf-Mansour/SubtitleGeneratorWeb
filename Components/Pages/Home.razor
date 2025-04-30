@@ -2,15 +2,12 @@
 @rendermode InteractiveServer
 
 <PageTitle>Home</PageTitle>
-
 @using System.Text
 @using System.Diagnostics
 @using Whisper.net
 @using Whisper.net.Ggml
 @using Microsoft.AspNetCore.Components.Forms
-
 <h1>Whisper.net Subtitle Generator</h1>
-
 @if (whisperProcessor is null)
 {
     <p>Loading Whisper Model... Please wait, my Lord 🔥</p>
@@ -41,12 +38,10 @@ else
 @code {
     private WhisperProcessor? whisperProcessor = null;
     private static WhisperFactory? whisperFactory = null;
-
     private IBrowserFile? selectedFile;
     private string txtResult = string.Empty;
     private bool isProcessing = false;
     private int progressPercent = 0;
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -67,8 +62,6 @@ else
             StateHasChanged();
         }
     }
-
-
     private static async Task DownloadModel(string fileName, GgmlType ggmlType)
     {
         Console.WriteLine($"Downloading Model {fileName}");
@@ -76,12 +69,6 @@ else
         using var fileWriter = File.OpenWrite(fileName);
         await modelStream.CopyToAsync(fileWriter);
     }
-
-
-
-
-
-
 
     private void HandleFileUpload(InputFileChangeEventArgs e)
     {
@@ -109,15 +96,13 @@ else
         {
             segments.Add(segment);
             count++;
-            progressPercent = count * 5; // crude approximation
-            if (progressPercent > 90) progressPercent = 90;
-            StateHasChanged();
         }
-
-        progressPercent = 95;
+ 
 
         for (int i = 0; i < segments.Count; i++)
         {
+            progressPercent = (i * 100) / segments.Count;
+            StateHasChanged();
             var seg = segments[i];
             sb.AppendLine($"{i + 1}");
             sb.AppendLine(ConvertTimestamp(seg.Start,seg.End));
@@ -159,6 +144,7 @@ else
         };
 
         var process = Process.Start(startInfo);
+        if (process is not null)
         await process.WaitForExitAsync();
 
         if (!File.Exists(tempOutputPath))
