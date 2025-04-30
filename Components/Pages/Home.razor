@@ -1,0 +1,172 @@
+﻿@page "/"
+@rendermode InteractiveServer
+
+<PageTitle>Home</PageTitle>
+
+@using System.Text
+@using System.Diagnostics
+@using Whisper.net
+@using Whisper.net.Ggml
+@using Microsoft.AspNetCore.Components.Forms
+
+<h1>Whisper.net Subtitle Generator</h1>
+
+@if (whisperProcessor is null)
+{
+    <p>Loading Whisper Model... Please wait, my Lord 🔥</p>
+}
+else
+{
+    <p>Select a WAV file (16kHz):</p>
+    <InputFile OnChange="HandleFileUpload" />
+}
+
+@if (selectedFile != null)
+{
+    <p><b>Selected:</b> @selectedFile.Name</p>
+    <button class="btn btn-primary" @onclick="ProcessFile" disabled="@isProcessing">Start Processing</button>
+}
+
+@if (isProcessing)
+{
+    <p>Processing: @progressPercent%</p>
+}
+
+@if (!string.IsNullOrEmpty(txtResult))
+{
+    <p><b>Generated Subtitles:</b></p>
+    <pre>@txtResult</pre>
+}
+
+@code {
+    private WhisperProcessor? whisperProcessor = null;
+    private static WhisperFactory? whisperFactory = null;
+
+    private IBrowserFile? selectedFile;
+    private string txtResult = string.Empty;
+    private bool isProcessing = false;
+    private int progressPercent = 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var modelFileName = "ggml-base.bin";
+        if (!File.Exists(modelFileName))
+        {
+            await DownloadModel(modelFileName, GgmlType.MediumEn);
+        }
+
+        if (whisperFactory is null)
+        whisperFactory = WhisperFactory.FromPath("ggml-base.bin");
+
+        if (whisperProcessor is null)
+        {
+            whisperProcessor = whisperFactory.CreateBuilder()
+                                             .WithLanguage("en")
+                                             .Build();
+            StateHasChanged();
+        }
+    }
+
+
+    private static async Task DownloadModel(string fileName, GgmlType ggmlType)
+    {
+        Console.WriteLine($"Downloading Model {fileName}");
+        using var modelStream = await WhisperGgmlDownloader.Default.GetGgmlModelAsync(ggmlType);
+        using var fileWriter = File.OpenWrite(fileName);
+        await modelStream.CopyToAsync(fileWriter);
+    }
+
+
+
+
+
+
+
+    private void HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        selectedFile = e.File;
+        txtResult = string.Empty;
+        progressPercent = 0;
+    }
+
+    private async Task ProcessFile()
+    {
+      await  aiEngine.ChangeLanguageAsync("Arabic");
+        if (selectedFile is null || whisperProcessor is null) return;
+
+        isProcessing = true;
+        txtResult = string.Empty;
+        progressPercent = 0;
+
+        var sb = new StringBuilder();
+        var segments = new List<SegmentData>();
+ 
+        int count = 0;
+        using var waveStream = await ConvertMp4ToWavAsync(selectedFile);
+
+        await foreach (var segment in whisperProcessor.ProcessAsync(waveStream))
+        {
+            segments.Add(segment);
+            count++;
+            progressPercent = count * 5; // crude approximation
+            if (progressPercent > 90) progressPercent = 90;
+            StateHasChanged();
+        }
+
+        progressPercent = 95;
+
+        for (int i = 0; i < segments.Count; i++)
+        {
+            var seg = segments[i];
+            sb.AppendLine($"{i + 1}");
+            sb.AppendLine(ConvertTimestamp(seg.Start,seg.End));
+
+
+            var text = seg.Text.Trim();
+            var AiText = await aiEngine.GetResponseAsync(text);
+            sb.AppendLine($"{AiText}\n");
+        }
+
+        txtResult = sb.ToString();
+        progressPercent = 100;
+        isProcessing = false;
+
+        // Save to Desktop
+        var fileName = Path.GetFileNameWithoutExtension(selectedFile.Name) + ".srt";
+        var filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), fileName);
+        await File.WriteAllTextAsync(filePath, txtResult);
+    }
+
+    private async Task<Stream> ConvertMp4ToWavAsync(IBrowserFile mp4File)
+    {
+        var tempInputPath = Path.GetTempFileName() + ".mp4";
+        var tempOutputPath = Path.GetTempFileName() + ".wav";
+
+        using (var stream = File.Create(tempInputPath))
+        {
+            await mp4File.OpenReadStream(int.MaxValue).CopyToAsync(stream);
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "ffmpeg",
+            Arguments = $"-i \"{tempInputPath}\" -ar 16000 -ac 1 -c:a pcm_s16le \"{tempOutputPath}\" -y",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        var process = Process.Start(startInfo);
+        await process.WaitForExitAsync();
+
+        if (!File.Exists(tempOutputPath))
+            throw new Exception("FFmpeg failed to convert file 😢");
+
+        return File.OpenRead(tempOutputPath);
+    }
+    string ConvertTimestamp(TimeSpan start, TimeSpan end) =>
+    $"{start:hh\\:mm\\:ss\\,fff} --> {end:hh\\:mm\\:ss\\,fff}";
+
+}
